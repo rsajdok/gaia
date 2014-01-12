@@ -119,6 +119,36 @@ contacts.Search = (function() {
     });
   };
 
+  var updateSearchList = function updateSearchList() {
+
+    window.setTimeout(function () {
+ 
+        var uuids = [];
+
+        for(var i=0;i<searchList.childNodes.length; i++){
+
+          var uuid = searchList.childNodes[i].dataset.uuid;
+          uuids.push(uuid);
+        }
+
+        resetState();
+        contactNodes = null;
+        searchTextCache = {};
+
+        var fragment = document.createDocumentFragment();
+
+        for(var i=0;i<uuids.length; i++){
+
+            var node = source.getNodeById(uuids[i]);
+            var clon = getClone(node);
+            fragment.appendChild(clon);
+        }
+
+        searchList.appendChild(fragment);
+
+      }, 2000);
+  };
+
   // Search mode instructions
   var exitSearchMode = function exitSearchMode(evt) {
     evt.preventDefault();
@@ -534,6 +564,7 @@ contacts.Search = (function() {
     'exitSearchMode': exitSearchMode,
     'isInSearchMode': isInSearchMode,
     'enableSearch': enableSearch,
+    'updateSearchList': updateSearchList,
     'selectRow': selectRow
   };
 })();

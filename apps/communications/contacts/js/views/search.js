@@ -121,11 +121,11 @@ contacts.Search = (function() {
 
   var updateSearchList = function updateSearchList() {
 
-    window.setTimeout(function () {
- 
+    window.setTimeout(function() {
+
         var uuids = [];
 
-        for(var i=0;i<searchList.childNodes.length; i++){
+        for (var i = 0; i < searchList.childNodes.length; i++) {
 
           var uuid = searchList.childNodes[i].dataset.uuid;
           uuids.push(uuid);
@@ -137,7 +137,7 @@ contacts.Search = (function() {
 
         var fragment = document.createDocumentFragment();
 
-        for(var i=0;i<uuids.length; i++){
+        for (var i = 0; i < uuids.length; i++) {
 
             var node = source.getNodeById(uuids[i]);
             var clon = getClone(node);

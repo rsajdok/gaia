@@ -15,6 +15,8 @@
 #                                                                             #
 # REPORTER    : Mocha reporter to use for test output.                        #
 #                                                                             #
+# MOZPERFOUT  : File path to output mozperf data. Empty mean stdout.          #
+#                                                                             #
 # MARIONETTE_RUNNER_HOST : The Marionnette runner host.                       #
 #                          Current values can be 'marionette-b2gdesktop-host' #
 #                          and 'marionette-device-host'                       #
@@ -28,8 +30,11 @@
 #                                                                             #
 # Lint your code                                                              #
 #                                                                             #
-# use "make hint" and "make lint" to lint using respectively jshint and       #
+# use "make hint" and "make gjslint" to lint using respectively jshint and    #
 # gjslint.                                                                    #
+#                                                                             #
+# Use "make lint" to lint using gjslint for blacklisted files, and jshint for #
+# other files.                                                                #
 #                                                                             #
 # APP=<app name> will hint/lint only this app.                                #
 # LINTED_FILES=<list of files> will (h/l)int only these space-separated files #
@@ -69,11 +74,13 @@ GAIA_DOMAIN?=gaiamobile.org
 
 DEBUG?=0
 DEVICE_DEBUG?=0
+NO_LOCK_SCREEN?=0
 PRODUCTION?=0
 DESKTOP_SHIMS?=0
 GAIA_OPTIMIZE?=0
 GAIA_DEV_PIXELS_PER_PX?=1
 DOGFOOD?=0
+ROCKETBAR?=1
 TEST_AGENT_PORT?=8789
 GAIA_APP_TARGET?=engineering
 
@@ -94,6 +101,7 @@ REMOTE_DEBUGGER?=0
 
 ifeq ($(DEVICE_DEBUG),1)
 REMOTE_DEBUGGER=1
+NO_LOCK_SCREEN=1
 endif
 
 # We also disable FTU when running in Firefox or in debug mode
@@ -134,11 +142,13 @@ ifneq ($(APP),)
 	endif
 endif
 
-REPORTER?=Spec
+REPORTER?=spec
 NPM_REGISTRY?=http://registry.npmjs.org
 # Ensure that NPM only logs warnings and errors
 export npm_config_loglevel=warn
 MARIONETTE_RUNNER_HOST?=marionette-b2gdesktop-host
+TEST_MANIFEST?=./shared/test/integration/travis-manifest.json
+MOZPERFOUT?=""
 
 GAIA_INSTALL_PARENT?=/system/b2g
 
@@ -350,6 +360,7 @@ define BUILD_CONFIG
 	"LOCAL_DOMAINS" : $(LOCAL_DOMAINS), \
 	"DESKTOP" : $(DESKTOP), \
 	"DEVICE_DEBUG" : $(DEVICE_DEBUG), \
+	"NO_LOCK_SCREEN" : $(NO_LOCK_SCREEN), \
 	"HOMESCREEN" : "$(HOMESCREEN)", \
 	"GAIA_PORT" : "$(GAIA_PORT)", \
 	"GAIA_LOCALES_PATH" : "$(GAIA_LOCALES_PATH)", \
@@ -371,6 +382,7 @@ define BUILD_CONFIG
 	"GAIA_APPDIRS" : "$(GAIA_APPDIRS)", \
 	"NOFTU" : "$(NOFTU)", \
 	"REMOTE_DEBUGGER" : "$(REMOTE_DEBUGGER)", \
+	"ROCKETBAR" : $(ROCKETBAR), \
 	"TARGET_BUILD_VARIANT" : "$(TARGET_BUILD_VARIANT)", \
 	"SETTINGS_PATH" : "$(SETTINGS_PATH)", \
 	"VARIANT_PATH" : "$(VARIANT_PATH)" \
@@ -461,7 +473,7 @@ else
 endif
 endif
 
-local-apps:
+local-apps: applications-data
 ifdef VARIANT_PATH
 	@$(call run-js-command, variant)
 endif
@@ -587,6 +599,12 @@ define run-js-command
 			}"
 endef
 
+define run-node-command
+	echo "run-node-command $1";
+	node --harmony -e \
+	"require('./build/$(strip $1).js').execute($$BUILD_CONFIG)"
+endef
+
 # Optional files that may be provided to extend the set of default
 # preferences installed for gaia.  If the preferences in these files
 # conflict, the result is undefined.
@@ -689,11 +707,12 @@ b2g: node_modules/.bin/mozilla-download
 test-integration: b2g $(PROFILE_FOLDER)
 	NPM_REGISTRY=$(NPM_REGISTRY) ./bin/gaia-marionette $(shell find . -path "*$(TEST_INTEGRATION_APP_NAME)/test/marionette/*_test.js") \
 		--host $(MARIONETTE_RUNNER_HOST) \
+		--manifest $(TEST_MANIFEST) \
 		--reporter $(REPORTER)
 
 .PHONY: test-perf
 test-perf:
-	APPS="$(APPS)" MARIONETTE_RUNNER_HOST=$(MARIONETTE_RUNNER_HOST) GAIA_DIR="`pwd`" NPM_REGISTRY=$(NPM_REGISTRY) ./bin/gaia-perf-marionette
+	MOZPERFOUT="$(MOZPERFOUT)" APPS="$(APPS)" MARIONETTE_RUNNER_HOST=$(MARIONETTE_RUNNER_HOST) GAIA_DIR="`pwd`" NPM_REGISTRY=$(NPM_REGISTRY) ./bin/gaia-perf-marionette
 
 .PHONY: tests
 tests: applications-data offline
@@ -817,32 +836,46 @@ endif
 # Utils                                                                       #
 ###############################################################################
 
-.PHONY: lint hint
+.PHONY: lint gjslint hint
 
 # Lint apps
+## only gjslint files from build/jshint-xfail.list - files not yet safe to jshint
+## "ls" is used to filter the existing files only, in case the xfail.list is not maintained well enough.
 ifndef LINTED_FILES
 ifdef APP
   JSHINTED_PATH = apps/$(APP)
-  GJSLINTED_PATH = -r apps/$(APP)
+  GJSLINTED_PATH = $(shell grep "^apps/$(APP)" build/jshint/xfail.list | ( while read file ; do test -f "$$file" && echo $$file ; done ) )
 else
   JSHINTED_PATH = apps shared
-  GJSLINTED_PATH = -r apps -r shared
+  GJSLINTED_PATH = $(shell ( while read file ; do test -f "$$file" && echo $$file ; done ) < build/jshint/xfail.list )
 endif
 endif
 
-lint: GJSLINT_EXCLUDED_DIRS = $(shell grep '\/\*\*$$' .jshintignore | sed 's/\/\*\*$$//' | paste -s -d, -)
-lint: GJSLINT_EXCLUDED_FILES = $(shell egrep -v '(\/\*\*|^\s*)$$' .jshintignore | paste -s -d, -)
 lint:
-	# --disable 210,217,220,225 replaces --nojsdoc because it's broken in closure-linter 2.3.10
+	NO_XFAIL=1 $(MAKE) -k gjslint hint
+
+gjslint: GJSLINT_EXCLUDED_DIRS = $(shell grep '\/\*\*$$' .jshintignore | sed 's/\/\*\*$$//' | paste -s -d, -)
+gjslint: GJSLINT_EXCLUDED_FILES = $(shell egrep -v '(\/\*\*|^\s*)$$' .jshintignore | paste -s -d, -)
+gjslint:
+	# gjslint --disable 210,217,220,225 replaces --nojsdoc because it's broken in closure-linter 2.3.10
 	# http://code.google.com/p/closure-linter/issues/detail?id=64
-	gjslint --disable 210,217,220,225 --custom_jsdoc_tags="event,example,mixes,mixin,fires,inner,todo,access,namespace,listens,module,memberOf,property" $(GJSLINTED_PATH) -e '$(GJSLINT_EXCLUDED_DIRS)' -x '$(GJSLINT_EXCLUDED_FILES)' $(LINTED_FILES)
+	@echo Running gjslint...
+	@gjslint --disable 210,217,220,225 --custom_jsdoc_tags="prop,borrows,memberof,augments,exports,global,event,example,mixes,mixin,fires,inner,todo,access,namespace,listens,module,memberOf,property" -e '$(GJSLINT_EXCLUDED_DIRS)' -x '$(GJSLINT_EXCLUDED_FILES)' $(GJSLINTED_PATH) $(LINTED_FILES)
+	@echo Note: gjslint only checked the files that are xfailed for jshint.
+
+JSHINT_ARGS := --reporter=build/jshint/xfail $(JSHINT_ARGS)
 
 ifdef JSHINTRC
 	JSHINT_ARGS := $(JSHINT_ARGS) --config $(JSHINTRC)
 endif
 
+ifdef VERBOSE
+	JSHINT_ARGS := $(JSHINT_ARGS) --verbose
+endif
+
 hint: node_modules/.bin/jshint
-	./node_modules/.bin/jshint $(JSHINT_ARGS) $(JSHINTED_PATH) $(LINTED_FILES)
+	@echo Running jshint...
+	@./node_modules/.bin/jshint $(JSHINT_ARGS) $(JSHINTED_PATH) $(LINTED_FILES) || (echo Please consult https://github.com/mozilla-b2g/gaia/tree/master/build/jshint/README.md to get some information about how to fix jshint issues. && exit 1)
 
 # Erase all the indexedDB databases on the phone, so apps have to rebuild them.
 delete-databases:
@@ -920,6 +953,7 @@ purge:
 	$(ADB) shell rm -r $(MSYS_FIX)/data/local/webapps
 	$(ADB) remount
 	$(ADB) shell rm -r $(MSYS_FIX)/system/b2g/webapps
+	$(ADB) shell 'if test -d $(MSYS_FIX)/persist/svoperapps; then rm -r $(MSYS_FIX)/persist/svoperapps; fi'
 
 $(PROFILE_FOLDER)/settings.json: profile-dir install-xulrunner-sdk
 ifeq ($(BUILD_APP_NAME),*)
@@ -973,5 +1007,6 @@ build-test-unit: $(NPM_INSTALLED_PROGRAMS)
 build-test-integration: $(NPM_INSTALLED_PROGRAMS)
 	@$(call run-build-test, $(shell find build/test/integration/*.test.js))
 
+.PHONY: docs
 docs: $(NPM_INSTALLED_PROGRAMS)
 	grunt docs

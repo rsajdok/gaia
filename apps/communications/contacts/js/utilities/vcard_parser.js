@@ -5,9 +5,32 @@ var VCFReader = (function _VCFReader() {
   var ReBasic = /^([^:]+):(.+)$/;
   var ReTuple = /([a-zA-Z]+)=(.+)/;
 
-  function getContact(contact) {
-    return (contact instanceof mozContact) ? contact : new mozContact(contact);
-  }
+  // Default tel type class
+  var DEFAULT_PHONE_TYPE = 'other';
+
+  //  basic type vcard to mobile type
+  var VCARD_SIMPLE_TYPES = {
+    'fax' : 'faxOther',
+    'faxother' : 'faxOther',
+    'home' : 'home',
+    'internet' : 'internet',
+    'cell' : 'mobile',
+    'pager' : 'pager',
+    'personal' : 'home',
+    'pref' : 'pref',
+    'text' : 'text',
+    'textphone' : 'textphone',
+    'voice' : 'voice',
+    'work' : 'work'
+  };
+
+  // complex type vcard to mobile type
+  var VCARD_COMPLEX_TYPES = {
+    'fax,work' : 'faxOffice',
+    'fax,home' : 'faxHome',
+    'voice,work' : 'work',
+    'voice,home' : 'home'
+  };
 
   function _parseTuple(p) {
     var match = p.match(ReTuple);
@@ -236,7 +259,7 @@ var VCFReader = (function _VCFReader() {
       var len = vcardObj[field].length;
       for (var i = 0; i < len; i++) {
         var v = vcardObj[field][i];
-        var metaValues = [];
+        var metaValues;
         var cur = {};
 
         if (v.meta) {
@@ -245,21 +268,65 @@ var VCFReader = (function _VCFReader() {
             cur.value = cur.value.replace(/^tel:/i, '');
           }
 
-          for (var j in v.meta) {
-            if (v.meta.hasOwnProperty(j)) {
-              if ((/pref/i).test(j)) {
-                cur.pref = true;
-              }
-              metaValues.push(v.meta[j]);
-            }
+          if (v.meta.type) {
+            metaValues = ([].slice.call(v.meta.type)).map(function(x) {
+              return x.trim().toLowerCase();
+            });
+          } else {
+            metaValues = Object.keys(v.meta).filter(
+                function noType(field) {
+                  return field !== 'type';
+                }
+              ).map(function(key) {
+                return v.meta[key].trim().toLowerCase();
+              });
           }
 
-          if (v.meta.type) {
-            cur.type = v.meta.type;
-            if (v.meta.type.indexOf('pref') !== -1 ||
-              v.meta.type.indexOf('PREF') !== -1) {
-              cur.pref = true;
-            }
+          if (metaValues.indexOf('pref') !== -1) {
+            cur.pref = true;
+            metaValues = metaValues.filter(
+              function noPref(field) { return field !== 'pref'; }
+            );
+          }
+
+          /*
+          * metaValues is an array of types. If metaValues length is:
+          *   0: it returns the default type (No type was defined),
+          *   1: If the element matches a simple type, returns the simple type,
+          *     if not, it returns the default type
+          *   2: If the elements match a complex type, it returns the complex
+          *    type. If not, then try to match the elements with a simple type,
+          *    in order. If one of the elements matches a simple type, it
+          *    returns the first element that matches a simple type or if there
+          *    exists no matching, it returns the default type value.
+          *   otherwise --> Returns the first element that matches a simple type
+          *    or if there exists no matching, it returns the default type value
+          * */
+          switch (metaValues.length) {
+            case 0:
+              cur.type = [DEFAULT_PHONE_TYPE];
+              break;
+            case 1:
+              cur.type = [VCARD_SIMPLE_TYPES[metaValues[0]] ||
+                          DEFAULT_PHONE_TYPE];
+              break;
+            case 2:
+              var complexType1 = metaValues[0] + ',' + metaValues[1];
+              var complexType2 = metaValues[1] + ',' + metaValues[0];
+              cur.type = [VCARD_COMPLEX_TYPES[complexType1] ||
+                          VCARD_COMPLEX_TYPES[complexType2] ||
+                          VCARD_SIMPLE_TYPES[metaValues[0]] ||
+                          VCARD_SIMPLE_TYPES[metaValues[1]] ||
+                          DEFAULT_PHONE_TYPE];
+              break;
+            default:
+              var typeFilter = function(metaValue) {
+                  return !!VCARD_SIMPLE_TYPES[metaValue];
+              };
+              cur.type = [
+                VCARD_SIMPLE_TYPES[metaValues.filter(typeFilter).shift()] ||
+                DEFAULT_PHONE_TYPE
+              ];
           }
         }
 
@@ -317,7 +384,7 @@ var VCFReader = (function _VCFReader() {
     _processComm(vcard, obj);
     _processFields(vcard, obj);
 
-    return new mozContact(obj);
+    return utils.misc.toMozContact(obj);
   };
 
   /**
@@ -331,6 +398,7 @@ var VCFReader = (function _VCFReader() {
     this.processed = 0;
     this.finished = false;
     this.currentChar = 0;
+    this.totalParsed = 0;
   };
 
   // Number of contacts processed at a given time.
@@ -367,6 +435,7 @@ var VCFReader = (function _VCFReader() {
     this.ondone = cb;
 
     LazyLoader.load(['/shared/js/simple_phone_matcher.js',
+      '/contacts/js/utilities/misc.js',
       '/contacts/js/contacts_matcher.js',
       '/contacts/js/contacts_merger.js',
       '/contacts/js/merger_adapter.js'
@@ -404,6 +473,7 @@ var VCFReader = (function _VCFReader() {
 
     var processed = this.processed;
     if (processed < this.total && processed % VCFReader.CONCURRENCY === 0) {
+      this.totalParsed += processed;
       this.splitLines();
     }
   };
@@ -431,7 +501,7 @@ var VCFReader = (function _VCFReader() {
         return;
       }
 
-      var contact = new mozContact(ct);
+      var contact = utils.misc.toMozContact(ct);
       var afterSaveFn = afterSave.bind(null, contact);
       var matchCbs = {
         onmatch: function(matches) {
@@ -460,7 +530,7 @@ var VCFReader = (function _VCFReader() {
    * @param {Function} cb Callback.
    */
   VCFReader._save = function(item, cb) {
-    var req = navigator.mozContacts.save(getContact(item));
+    var req = navigator.mozContacts.save(utils.misc.toMozContact(item));
     req.onsuccess = cb;
     req.onerror = cb;
   };
@@ -506,7 +576,7 @@ var VCFReader = (function _VCFReader() {
 
       // Ignore beginning whitespace that indicates multiline field.
       if (multiline === true) {
-        if (ch === ' ' || ch === '\t') {
+        if (ch === ' ' || ch === '\t' || ch === '\r' || ch === '\n') {
           continue;
         } else {
           //currentLine += '\n'
@@ -518,6 +588,7 @@ var VCFReader = (function _VCFReader() {
       if (inLabel || (ch !== '\n' && ch !== '\r')) {
         // If we have a quoted-printable sign for multiline (/=\n/), ignore it.
         if (ch === '=' && next && next.search(/(\r|\n)/) !== -1) {
+          multiline = true;
           continue;
         }
 
@@ -546,10 +617,12 @@ var VCFReader = (function _VCFReader() {
         cardsProcessed += 1;
 
         if (cardsProcessed === VCFReader.CONCURRENCY ||
-          cardsProcessed === this.total) {
+          (cardsProcessed + this.totalParsed) === this.total) {
           _parseEntries(cardArray, callPost);
           break;
         }
+
+        currentLine = '';
 
         cardArray.push([]);
 

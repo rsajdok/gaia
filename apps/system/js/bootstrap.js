@@ -4,6 +4,17 @@
 'use strict';
 
 window.addEventListener('load', function startup() {
+
+  /**
+   * Register global instances and constructors here.
+   */
+  function registerGlobalEntries() {
+    /** @global */
+    window.secureWindowManager = new SecureWindowManager();
+    /** @global */
+    window.secureWindowFactory = new SecureWindowFactory();
+  }
+
   function safelyLaunchFTU() {
     window.addEventListener('homescreen-ready', function onHomescreenReady() {
       window.removeEventListener('homescreen-ready', onHomescreenReady);
@@ -13,10 +24,12 @@ window.addEventListener('load', function startup() {
   }
 
   if (Applications.ready) {
+    registerGlobalEntries();
     safelyLaunchFTU();
   } else {
     window.addEventListener('applicationready', function appListReady(event) {
       window.removeEventListener('applicationready', appListReady);
+      registerGlobalEntries();
       safelyLaunchFTU();
     });
   }
@@ -33,6 +46,7 @@ window.addEventListener('load', function startup() {
   SourceView.init();
   Shortcuts.init();
   ScreenManager.turnScreenOn();
+  Places.init();
 
   // We need to be sure to get the focus in order to wake up the screen
   // if the phone goes to sleep before any user interaction.

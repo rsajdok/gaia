@@ -25,14 +25,8 @@ section[role="region"] {
   width: 100%;
   height: 100%;
   border: 0;
-  /*
-    we need the background pattern when the app content is less then viewport
-    (see Bug 938785)
-  */
-  background-color: #f4f4f4;
   overflow: hidden;
 }
-
 
 /**
  * Panel targets -- transitions
@@ -71,6 +65,14 @@ section[role="region"] > div {
   will-change: scroll-position;
 }
 
+/*
+ * Need this for scrollable background layer
+ * optimization in gecko. See Bug 950250
+ */
+section[role="region"],
+section[role="region"] > div > ul {
+  background-color: #f4f4f4;
+}
 
 /******************************************************************************
  * Explanation texts
@@ -441,7 +443,8 @@ section ul.operate-certificate {
  * Volume & Brightness: min/max icons
  */
 
-ul li > label .range-icons {
+ul li > label.range-icons:before {
+  content: '';
   position: absolute;
   top: calc(50% - 1.5rem);
   right: 0;
@@ -453,7 +456,7 @@ ul li > label .range-icons {
   pointer-events: none;
 }
 
-ul li > label .range-icons.brightness {
+ul li > label.range-icons.brightness:before {
   background:
     url(images/range_icons_brightness_min.png) no-repeat 0 50%,
     url(images/range_icons_brightness_max.png) no-repeat 100% 50%;
@@ -665,3 +668,14 @@ section[data-dialog] > header:first-child .icon.icon-back {
   background-image: url(/shared/style/headers/images/icons/close.png);
 }
 
+/******************************************************************************
+ * Toaster
+ */
+section[role="status"] {
+  transition: opacity .6s ease 0s;
+  opacity: 0;
+}
+
+section[role="status"].toast-visible {
+  opacity: 1;
+}

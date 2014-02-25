@@ -576,10 +576,6 @@ contacts.Form = (function() {
     cancelHandler = doCancel.bind(callbacks);
     cancelButton.addEventListener('click', cancelHandler);
     doMatch(contact, callbacks);
-
-    if (contacts.Search)
-      contacts.Search.updateSearchList();
-
   };
 
   var cookMatchingCallbacks = function cookMatchingCallbacks(contact) {

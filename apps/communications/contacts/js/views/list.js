@@ -1323,6 +1323,8 @@ contacts.List = (function() {
     addToList(contact, enriched);
     if (callback)
       callback(contact.id);
+
+    contacts.Search.updateSearchList();
   };
 
   var callbacks = [];

@@ -831,13 +831,15 @@ contacts.Form = (function() {
 
         updateCategoryForImported(contact);
 
-        var callbacks = cookMatchingCallbacks(contact);
-        cancelHandler = doCancel.bind(callbacks);
-        formHeader.addEventListener('action', cancelHandler);
-        doMatch(contact, callbacks);
-      });
-    });
-  }
+    var callbacks = cookMatchingCallbacks(contact);
+    cancelHandler = doCancel.bind(callbacks);
+    cancelButton.addEventListener('click', cancelHandler);
+    doMatch(contact, callbacks);
+
+    if (contacts.Search)
+      contacts.Search.updateSearchList();
+
+  };
 
   var cookMatchingCallbacks = function cookMatchingCallbacks(contact) {
     return {
